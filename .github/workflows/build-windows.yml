@@ -11,23 +11,43 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # windows-latest kini memetakan ke Windows Server 2025 + Visual Studio 2026,
+    # yang tidak punya generator "Visual Studio 17 2022" sehingga configure
+    # langsung gagal. Pin ke image VS 2022 yang masih GA.
+    runs-on: windows-2022
     timeout-minutes: 45
+
+    env:
+      CMAKE_GENERATOR: Visual Studio 17 2022
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Diagnostik toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          where.exe cmake
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Directory |
+            Select-Object -ExpandProperty Name
 
       - name: Siapkan JUCE 8.0.10
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           if (-not (Test-Path "external/JUCE/CMakeLists.txt")) {
             git clone --depth 1 --branch 8.0.10 https://github.com/juce-framework/JUCE.git external/JUCE
+            if ($LASTEXITCODE -ne 0) { throw "git clone JUCE gagal (exit $LASTEXITCODE)" }
+          }
+          if (-not (Test-Path "external/JUCE/CMakeLists.txt")) {
+            throw "JUCE tidak lengkap: external/JUCE/CMakeLists.txt tidak ditemukan."
           }
 
       - name: Siapkan WebView2 SDK
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $dest = "external/webview2pkg/Microsoft.Web.WebView2.1.0.1901.177"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           $nupkg = Join-Path $env:RUNNER_TEMP "webview2.nupkg"
@@ -38,13 +58,36 @@ jobs:
           }
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DRRLIVE_BUILD_TESTS=ON
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DRRLIVE_BUILD_TESTS=ON 2>&1 |
+            Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Release
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Unit tests
-        run: ctest --test-dir build -C Release --output-on-failure
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload log jika gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          if-no-files-found: ignore
+          path: |
+            configure.log
+            build.log
+            test.log
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            build/CMakeCache.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

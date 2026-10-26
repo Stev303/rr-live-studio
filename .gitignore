@@ -17,3 +17,6 @@ external/*.zip
 build_full.log
 configure.log
 test_output.log
+
+# Reproduksi konfigurasi gaya CI
+build-ci/
