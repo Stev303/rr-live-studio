@@ -1,0 +1,19 @@
+# Build output
+build/
+out/
+.vs/
+*.user
+*.suo
+CMakeUserPresets.json
+
+# Dependencies (diambil ulang oleh CMake FetchContent / workflow CI)
+external/JUCE/
+external/webview2/
+external/webview2pkg/
+external/*.zip
+
+# Logs and local test artefacts
+*.log
+build_full.log
+configure.log
+test_output.log

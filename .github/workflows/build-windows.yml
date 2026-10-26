@@ -1,0 +1,56 @@
+name: Build Windows x64
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Siapkan JUCE 8.0.10
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "external/JUCE/CMakeLists.txt")) {
+            git clone --depth 1 --branch 8.0.10 https://github.com/juce-framework/JUCE.git external/JUCE
+          }
+
+      - name: Siapkan WebView2 SDK
+        shell: pwsh
+        run: |
+          $dest = "external/webview2pkg/Microsoft.Web.WebView2.1.0.1901.177"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $nupkg = Join-Path $env:RUNNER_TEMP "webview2.nupkg"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.1901.177" -OutFile $nupkg -UseBasicParsing
+          Expand-Archive -Path $nupkg -DestinationPath $dest -Force
+          if (-not (Test-Path "$dest/build/native/include/WebView2.h")) {
+            throw "WebView2 SDK tidak lengkap: WebView2.h tidak ditemukan."
+          }
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DRRLIVE_BUILD_TESTS=ON
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: RrLiveStudio-windows-x64
+          if-no-files-found: error
+          path: |
+            build/RrLiveStudio_artefacts/Release/Rr Live Studio.exe
+            build/RrLiveStudioTests_artefacts/Release/RrLiveStudioTests.exe
